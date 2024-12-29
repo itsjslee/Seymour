@@ -1,16 +1,26 @@
 import yfinance as yf
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
-import talib
+import ta
 import numpy as np
 import matplotlib.pyplot as plt
 
-asset = input("Select an Asset to Trade: ")
-datestart = input("Start date of backtest: ")
+# Get user input with better defaults and error handling
+def get_stock_inputs():
+    asset = input("Select an Asset to Trade (default: TSLA): ").upper() or 'TSLA'
+    datestart = input("Start date of backtest (default: 2020-01-01): ") or '2020-01-01'
+    
+    try:
+        # Verify the ticker exists
+        ticker = yf.Ticker(asset)
+        info = ticker.info
+        print(f"\nAnalyzing {asset} from {datestart}")
+        return asset, datestart
+    except:
+        print(f"Error: Could not find ticker {asset}. Defaulting to TSLA.")
+        return 'TSLA', datestart
 
-if asset == "":
-    asset = 'TSLA' # The asset to trade, currently it is Tesla
-    datestart = '2020-01-01' # How long ago the back test should occur
+asset, datestart = get_stock_inputs()
 
 stop_loss = -0.7 # If a 70% loss occurs, the program issues a sell call, and then exits the program to stop further loss.
 notify_loss = -0.3 # If a 30% loss occurs, the program issues a sell call, and then conducts no trades for the next "waitdays" trading days
@@ -29,15 +39,21 @@ frames = yf.download(asset, start=datestart) # Getting backtesting data
 # frames.head()
 frames.loc[:, 'EMA10'] = frames['Close'].ewm(span=10, adjust=False).mean() # Calculating the 10 day moving exponential average
 
-frames.loc[:, "RSI"] = talib.RSI(frames.Close, 14) # Calculating the 2 week RSI Exponential
+frames.loc[:, "RSI"] = ta.momentum.RSIIndicator(frames['Close'].squeeze(), window=14).rsi() # Calculating the 2 week RSI Exponential
 frames = frames.iloc[14:]
 #print(frames)
 df = frames
 
 # Issuing a buy signal whenever the closing price is less than the 10 day EMA and if the 2 week RSI is greater than 30 but less than 70
-df.loc[:, 'Buy_Signal'] = np.where((df.Close <= df.EMA10) & (df.RSI <= 30), True, False) 
+df.loc[:, 'Buy_Signal'] = np.where(
+    (df['Close'].values <= df['EMA10'].values) & (df['RSI'].values <= 30), 
+    True, False
+) 
 # Issuing a sell signal whenever the closing price is greater than the 10 day EMA and if the 2 week RSI is greater than 70
-df.loc[:, 'Sell_Signal'] = np.where((df.Close >= df.EMA10) & (df.RSI >= 70), True, False)
+df.loc[:, 'Sell_Signal'] = np.where(
+    (df['Close'].values >= df['EMA10'].values) & (df['RSI'].values >= 70), 
+    True, False
+)
 
 
 df.loc[:, 'Holding'] = 0
