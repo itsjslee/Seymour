@@ -1,127 +1,202 @@
 import yfinance as yf
 import pandas as pd
-pd.options.mode.chained_assignment = None  # default='warn'
-import ta
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import datetime
+import sys
 
-# Get user input with better defaults and error handling
-def get_stock_inputs():
-    asset = input("Select an Asset to Trade (default: TSLA): ").upper() or 'TSLA'
-    datestart = input("Start date of backtest (default: 2020-01-01): ") or '2020-01-01'
+def calculate_rsi(data, periods=14):
+    """Calculate RSI using native pandas functions with proper index alignment"""
+    # Calculate price changes
+    delta = data.diff()
     
+    # Create two copies of the price change series
+    gains = delta.copy()
+    losses = delta.copy()
+    
+    # Zero out the gains where price decreased
+    gains[gains < 0] = 0
+    # Zero out the losses where price increased and make positive
+    losses[losses > 0] = 0
+    losses = abs(losses)
+    
+    # Calculate simple moving average of gains and losses
+    avg_gains = gains.rolling(window=periods).mean()
+    avg_losses = losses.rolling(window=periods).mean()
+    
+    # Calculate RS (Relative Strength)
+    rs = avg_gains / avg_losses
+    
+    # Calculate RSI
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+def validate_ticker(ticker):
+    """Validate if the ticker exists and has data"""
     try:
-        # Verify the ticker exists
-        ticker = yf.Ticker(asset)
-        info = ticker.info
-        print(f"\nAnalyzing {asset} from {datestart}")
-        return asset, datestart
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        return True
     except:
-        print(f"Error: Could not find ticker {asset}. Defaulting to TSLA.")
-        return 'TSLA', datestart
+        return False
 
-asset, datestart = get_stock_inputs()
+def validate_date(date_str):
+    """Validate if the date string is in correct format"""
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return True
+    except ValueError:
+        return False
 
-stop_loss = -0.7 # If a 70% loss occurs, the program issues a sell call, and then exits the program to stop further loss.
-notify_loss = -0.3 # If a 30% loss occurs, the program issues a sell call, and then conducts no trades for the next "waitdays" trading days
-waitdays = 5 # The number of days to halt trading after a 30% loss, currently 5 trading days or 1 week.
+def run_trading_strategy(asset=None, start_date=None, params=None):
+    """
+    Run trading strategy with specified parameters
+    """
+    # Default parameters
+    default_params = {
+        'stop_loss': -0.7,  # 70% loss triggers complete exit
+        'notify_loss': -0.3,  # 30% loss triggers trading halt
+        'waitdays': 5,  # Trading halt duration in days
+        'ema_period': 10,  # EMA period
+        'rsi_period': 14,  # RSI period
+        'rsi_oversold': 30,  # RSI oversold threshold
+        'rsi_overbought': 70  # RSI overbought threshold
+    }
     
+    # Update defaults with provided parameters if any
+    if params:
+        default_params.update(params)
+    params = default_params
 
-frames = yf.download(asset, start=datestart) # Getting backtesting data
-# for i in datesframe.index:
-#     temp = yf.download(asset, start=i, end=i + dt.timedelta(days=1))
-#     temp = pd.DataFrame(temp)
-#     temp = temp[:-1]
-#     frames.append(temp)
+    # Get user input if not provided
+    while not asset:
+        asset = input("Enter stock ticker symbol (e.g. AAPL): ").upper()
+        if not validate_ticker(asset):
+            print(f"Error: Could not find ticker {asset}. Please try again.")
+            asset = None
 
-# frames = pd.concat(frames)
+    while not start_date:
+        start_date = input("Enter start date (YYYY-MM-DD): ")
+        if not validate_date(start_date):
+            print("Error: Invalid date format. Please use YYYY-MM-DD.")
+            start_date = None
 
-# frames.head()
-frames.loc[:, 'EMA10'] = frames['Close'].ewm(span=10, adjust=False).mean() # Calculating the 10 day moving exponential average
+    try:
+        # Download data
+        df = yf.download(asset, start=start_date)
+        if df.empty:
+            print(f"No data available for {asset} from {start_date}")
+            return
 
-frames.loc[:, "RSI"] = ta.momentum.RSIIndicator(frames['Close'].squeeze(), window=14).rsi() # Calculating the 2 week RSI Exponential
-frames = frames.iloc[14:]
-#print(frames)
-df = frames
+        # Calculate indicators
+        df['EMA10'] = df['Close'].ewm(span=params['ema_period'], adjust=False).mean()
+        df['RSI'] = calculate_rsi(df['Close'], periods=params['rsi_period'])
+        
+        # Remove NaN values
+        df = df.dropna()
 
-# Issuing a buy signal whenever the closing price is less than the 10 day EMA and if the 2 week RSI is greater than 30 but less than 70
-df.loc[:, 'Buy_Signal'] = np.where(
-    (df['Close'].values <= df['EMA10'].values) & (df['RSI'].values <= 30), 
-    True, False
-) 
-# Issuing a sell signal whenever the closing price is greater than the 10 day EMA and if the 2 week RSI is greater than 70
-df.loc[:, 'Sell_Signal'] = np.where(
-    (df['Close'].values >= df['EMA10'].values) & (df['RSI'].values >= 70), 
-    True, False
-)
+        # Generate signals using .loc to ensure alignment
+        df['Buy_Signal'] = False
+        df['Sell_Signal'] = False
+        df.loc[(df['Close'] <= df['EMA10']) & (df['RSI'] <= params['rsi_oversold']), 'Buy_Signal'] = True
+        df.loc[(df['Close'] >= df['EMA10']) & (df['RSI'] >= params['rsi_overbought']), 'Sell_Signal'] = True
 
+        # Initialize trading variables
+        df['Holding'] = 0
+        df['Bought'] = 0
+        df['Sold'] = 0
+        df['Buy_Price'] = 0.0
+        df['Curr_Profit'] = 0.0
+        df['Circuitbreaker'] = False
+        
+        # Conduct backtest
+        open_pos = False
+        buy_price = 0.0
+        circuitbreaker = 0
 
-df.loc[:, 'Holding'] = 0
-df.loc[:, 'Bought'] = 0
-df.loc[:, 'Sold'] = 0
-df.loc[:, 'Buy_Price'] = 0.0
-df.loc[:, 'Curr_Profit'] = 0.0
-df.loc[:, 'Circuitbreaker'] = False
-df = df.dropna()
+        for i in df.index:
+            if circuitbreaker > 0:
+                df.loc[i, 'Circuitbreaker'] = True
+                circuitbreaker -= 1
+                continue
 
-open_pos = False
-Buy_Price = 0.0
-circuitbreaker = 0
-# Conducting Backtest
-for i in df.index:
-    if circuitbreaker != 0: # Checking for stopped testing days
-        df.loc[i, 'Circuitbreaker'] = True
-        circuitbreaker = circuitbreaker - 1
-        continue
-    if open_pos: # Checking if currently holding
-        df.loc[i, 'Holding'] = 1
-        if Buy_Price == 0.0:
-            Buy_Price = df.loc[i, 'Open']
-            df.loc[i, 'Buy_Price'] = Buy_Price
-        elif Buy_Price != 0.0:
-            df.loc[i, 'Buy_Price'] = Buy_Price
-        df.loc[i, 'Curr_Profit'] = (df.loc[i, 'Open'] - Buy_Price)/Buy_Price # Calculating Profit
-    elif open_pos == False:
-        df.loc[i, 'Holding'] = 0
-        Buy_Price = 0.0
-    if open_pos:
-        if ((df.Close[i] >= df.EMA10[i]) & (df.RSI[i] >= 70)): # If conditions are met then sell 
-            df.loc[i, 'Sold'] = 1
-            open_pos = False
-        if df.loc[i, 'Curr_Profit'] < stop_loss: # Checking for stop loss, aka 70% loss
-            df.loc[i, 'Sold'] = 1
-            open_pos = False
-            break
-        if df.loc[i, 'Curr_Profit'] < notify_loss: # Checking for "waitdays", aka 30% loss
-            df.loc[i, 'Sold'] = 1
-            open_pos = False
-            circuitbreaker = waitdays
-    elif open_pos == False:
-        if ((df.Close[i] <= df.EMA10[i]) & (df.RSI[i] <= 30)): # If conditions are met then buy 
-            df.loc[i, 'Bought'] = 1
-            open_pos = True
+            if open_pos:
+                df.loc[i, 'Holding'] = 1
+                if buy_price == 0.0:
+                    buy_price = df.loc[i, 'Open']
+                df.loc[i, 'Buy_Price'] = buy_price
+                df.loc[i, 'Curr_Profit'] = (df.loc[i, 'Open'] - buy_price)/buy_price
 
+                # Check sell conditions
+                if df.loc[i, 'Sell_Signal']:
+                    df.loc[i, 'Sold'] = 1
+                    open_pos = False
+                elif df.loc[i, 'Curr_Profit'] < params['stop_loss']:
+                    df.loc[i, 'Sold'] = 1
+                    open_pos = False
+                    print(f"Stop loss triggered on {i.strftime('%Y-%m-%d')}")
+                    break
+                elif df.loc[i, 'Curr_Profit'] < params['notify_loss']:
+                    df.loc[i, 'Sold'] = 1
+                    open_pos = False
+                    circuitbreaker = params['waitdays']
+                    print(f"Circuit breaker triggered on {i.strftime('%Y-%m-%d')}")
 
-df.loc[:, 'Bought'] = df.loc[:, 'Bought'].shift(1, fill_value=0)
-df.loc[:, 'Sold'] = df.loc[:, 'Sold'].shift(1, fill_value=0)
-#print(df) 
+            else:
+                df.loc[i, 'Holding'] = 0
+                buy_price = 0.0
+                if df.loc[i, 'Buy_Signal']:
+                    df.loc[i, 'Bought'] = 1
+                    open_pos = True
 
-plt.figure(figsize=(12,6))
-plt.plot(df[['Close', 'EMA10']])
-plt.scatter(df[df['Bought'] == 1].index, df[df['Bought'] == 1].Open, marker = '^', color='g')
-plt.scatter(df[df['Sold'] == 1].index, df[df['Sold'] == 1].Open, marker = 'v', color='r')
-plt.legend(['Close', 'EMA10'])
-plt.show() # Display bought as green arrow, and sold as red arrow
+        # Shift signals for plotting
+        df['Bought'] = df['Bought'].shift(1, fill_value=0)
+        df['Sold'] = df['Sold'].shift(1, fill_value=0)
 
-merged = pd.concat([df[df['Bought'] == 1].Open, df[df['Sold'] == 1].Open, df[df['Circuitbreaker'] == True].Circuitbreaker], axis=1)
-merged.columns = ['Buys', 'Sells', 'Circuitbreaker']
-print(merged) # Show all buys and sells along with non-trading days
+        # Plotting
+        plt.figure(figsize=(15,7))
+        plt.plot(df.index, df['Close'], label='Close', alpha=0.8)
+        plt.plot(df.index, df['EMA10'], label=f'EMA{params["ema_period"]}', alpha=0.8)
+        plt.scatter(df[df['Bought'] == 1].index, 
+                   df[df['Bought'] == 1]['Open'], 
+                   marker='^', color='g', s=100, label='Buy')
+        plt.scatter(df[df['Sold'] == 1].index, 
+                   df[df['Sold'] == 1]['Open'], 
+                   marker='v', color='r', s=100, label='Sell')
+        plt.title(f'{asset} Trading Strategy Results')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
 
-# Calculate total profit
-totalprofit = merged.shift(-1).Sells - merged.Buys
-relprofit = (merged.shift(-1).Sells - merged.Buys)/merged.Buys
-relprofit = relprofit.dropna()
-totalrelprofit = 1
-for i in relprofit:
-    totalrelprofit = totalrelprofit * (1+i)
-print("Total profit is: " + str(totalrelprofit*100-100) + "%") # Show total profit
+        # Calculate and display results
+        trades = pd.concat([
+            df[df['Bought'] == 1]['Open'].rename('Buys'),
+            df[df['Sold'] == 1]['Open'].rename('Sells'),
+            df[df['Circuitbreaker']].Circuitbreaker.rename('Circuitbreaker')
+        ], axis=1)
+        
+        print("\nTrade Summary:")
+        print(trades)
+
+        # Calculate profits
+        profits = trades.shift(-1).Sells - trades.Buys
+        rel_profits = profits / trades.Buys
+        total_return = np.prod(1 + rel_profits.dropna()) - 1
+        
+        print(f"\nStrategy Performance for {asset}:")
+        print(f"Total Return: {total_return*100:.2f}%")
+        print(f"Number of Trades: {len(profits.dropna())}")
+        if len(profits.dropna()) > 0:
+            print(f"Average Return per Trade: {rel_profits.mean()*100:.2f}%")
+            print(f"Win Rate: {(rel_profits > 0).mean()*100:.2f}%")
+
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+
+if __name__ == "__main__":
+    run_trading_strategy()
