@@ -7,3 +7,5 @@ Seymour is an interactive web-based tool designed to:
 - Visualize stock data and predictions in an intuitive interface.
 
 This app is built using Streamlit for the frontend and integrates various data analysis libraries like pandas, yfinance, and scikit-learn for backend computations.
+
+*SEYMOUR IS AN EDUCATIONAL TOOL AND DOES NOT PROVIDE FINANCIAL ADVICE. TRADE AT YOUR OWN DISCRETION.*
