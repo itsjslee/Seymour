@@ -45,6 +45,6 @@ if st.button("Analyze"):
         plt.figure(figsize=(12, 6))
         plt.plot(data['Close'], label='Historical Close', color='#ffffff')  # White
         plt.plot(forecast['Date'], forecast['Predicted_Close'], label='Predicted Close', color='#ffff00')  # Yellow
-        plt.title(f"{ticker} Future Price Trend")
+        plt.title(f"{ticker}")
         plt.legend()
         st.pyplot(plt)
