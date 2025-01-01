@@ -30,7 +30,7 @@ if st.button("Analyze"):
         plt.plot(data['bb_high'], label='Upper Band', linestyle='--', color='#00ff41')  # Red
         plt.plot(data['bb_low'], label='Lower Band', linestyle='--', color='#ff4b4b')  # Green
         plt.fill_between(data.index, data['bb_low'], data['bb_high'], color='gray', alpha=0.1)
-        plt.title(f"{ticker} Bollinger Bands")
+        plt.title(f"{ticker}")
         plt.legend()
         st.pyplot(plt)
 
@@ -45,6 +45,6 @@ if st.button("Analyze"):
         plt.figure(figsize=(12, 6))
         plt.plot(data['Close'], label='Historical Close', color='#ffffff')  # White
         plt.plot(forecast['Date'], forecast['Predicted_Close'], label='Predicted Close', color='#ffff00')  # Yellow
-        plt.title(f"{ticker} Future Price Prediction")
+        plt.title(f"{ticker} Future Price Trend")
         plt.legend()
         st.pyplot(plt)
