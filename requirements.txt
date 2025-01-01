@@ -1,5 +1,6 @@
+streamlit
 matplotlib
-uvicorn
 yfinance
 pandas
 numpy
+scikit-learn
