@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from backend import get_stock_data, calculate_bollinger_bands, predict_prices
 
 # Streamlit App
-st.title("Make smart trades with *Seymour*.")
+st.title("Analyze the market with *Seymour*.")
 
 # User Inputs
 ticker = st.text_input("Enter Stock Ticker:").upper()
