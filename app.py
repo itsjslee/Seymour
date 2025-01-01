@@ -27,8 +27,8 @@ if st.button("Analyze"):
         plt.style.use('dark_background')
         plt.figure(figsize=(12, 6))
         plt.plot(data['Close'], label='Close Price', color='#ffffff')  # White
-        plt.plot(data['bb_high'], label='Upper Band', linestyle='--', color='#ff4b4b')  # Red
-        plt.plot(data['bb_low'], label='Lower Band', linestyle='--', color='#00ff41')  # Green
+        plt.plot(data['bb_high'], label='Upper Band', linestyle='--', color='#00ff41')  # Red
+        plt.plot(data['bb_low'], label='Lower Band', linestyle='--', color='#ff4b4b')  # Green
         plt.fill_between(data.index, data['bb_low'], data['bb_high'], color='gray', alpha=0.1)
         plt.title(f"{ticker} Bollinger Bands")
         plt.legend()
